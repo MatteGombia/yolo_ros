@@ -119,7 +119,8 @@ class YoloNode(LifecycleNode):
             depth=1,
         )
 
-        self._pub = self.create_lifecycle_publisher(DetectionArray, "detections", 10)
+        self._pub_right = self.create_lifecycle_publisher(DetectionArray, "/camera/right_bb", 10)
+        self._pub_left = self.create_lifecycle_publisher(DetectionArray, "/camera/left_bb", 10)
         self.cv_bridge = CvBridge()
 
         super().on_configure(state)
@@ -149,8 +150,11 @@ class YoloNode(LifecycleNode):
                 SetClasses, "set_classes", self.set_classes_cb
             )
 
-        self._sub = self.create_subscription(
-            Image, "image_raw", self.image_cb, self.image_qos_profile
+        self._sub_left = self.create_subscription(
+            Image, "/camera/left_image", self.left_image_cb, self.image_qos_profile
+        )
+        self._sub_right = self.create_subscription(
+            Image, "/camera/right_image", self.right_image_cb, self.image_qos_profile
         )
 
         super().on_activate(state)
@@ -173,8 +177,10 @@ class YoloNode(LifecycleNode):
             self.destroy_service(self._set_classes_srv)
             self._set_classes_srv = None
 
-        self.destroy_subscription(self._sub)
-        self._sub = None
+        self.destroy_subscription(self._sub_left)
+        self._sub_left = None
+        self.destroy_subscription(self._sub_right)
+        self._sub_right = None
 
         super().on_deactivate(state)
         self.get_logger().info(f"[{self.get_name()}] Deactivated")
@@ -184,7 +190,8 @@ class YoloNode(LifecycleNode):
     def on_cleanup(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Cleaning up...")
 
-        self.destroy_publisher(self._pub)
+        self.destroy_publisher(self._pub_right)
+        self.destroy_publisher(self._pub_left)
 
         del self.image_qos_profile
 
@@ -324,10 +331,10 @@ class YoloNode(LifecycleNode):
 
         return keypoints_list
 
-    def image_cb(self, msg: Image) -> None:
-
+    def detect(self, msg: Image):
+        self.get_logger().info(f"CIAOOOO: ")
         if self.enable:
-
+            self.get_logger().info(f"CIAO2: ")
             # convert image + predict
             cv_image = self.cv_bridge.imgmsg_to_cv2(
                 msg, desired_encoding=self.yolo_encoding
@@ -379,13 +386,31 @@ class YoloNode(LifecycleNode):
                     aux_msg.keypoints = keypoints[i]
 
                 detections_msg.detections.append(aux_msg)
-
-            # publish detections
-            detections_msg.header = msg.header
-            self._pub.publish(detections_msg)
-
             del results
             del cv_image
+            return detections_msg
+            
+        return DetectionArray()
+
+    def right_image_cb(self, msg: Image) -> None:
+        self.get_logger().info(f"rightttt")
+        detections_msg = DetectionArray()
+        detections_msg = self.detect(msg)
+
+            # publish detections
+        detections_msg.header = msg.header
+        self._pub_right.publish(detections_msg)
+    
+    def left_image_cb(self, msg: Image) -> None:
+        self.get_logger().info(f"leftttt")
+        detections_msg = DetectionArray()
+        detections_msg = self.detect(msg)
+
+            # publish detections
+        detections_msg.header = msg.header
+        self._pub_left.publish(detections_msg)
+
+        
 
     def set_classes_cb(
         self,
